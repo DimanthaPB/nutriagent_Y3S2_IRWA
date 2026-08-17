@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+
+# Add once you implement real retrieval (see README "Next steps"):
+# chromadb==0.5.5
+# sentence-transformers==3.1.1
+# requests==2.32.3   # if calling the USDA FoodData Central API directly

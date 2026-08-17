@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+httpx==0.27.2
+pydantic==2.9.2
+
+# Add once you implement real NLP (see README "Next steps"):
+# spacy==3.7.6
+# anthropic==0.34.2   # if you extract entities via an LLM call instead

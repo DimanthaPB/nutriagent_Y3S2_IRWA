@@ -73,6 +73,7 @@ class RateLimitingTests(unittest.TestCase):
             "http://intake.test:8002/process",
             json={"user_id": "test-demo", "raw_text": "I want a meal plan"},
             timeout=30.0,
+            headers={"X-Trace-ID": response.headers["X-Trace-ID"]},
         )
 
     def test_eleventh_process_returns_429_without_forwarding(self):

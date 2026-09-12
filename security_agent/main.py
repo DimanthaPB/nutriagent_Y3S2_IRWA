@@ -16,9 +16,11 @@ from slowapi.util import get_remote_address
 from shared.schemas import SecurityRequest
 from security_agent.auth import create_access_token, verify_access_token
 from security_agent.validation import sanitize_text
+from security_agent.logging_config import TraceLoggingMiddleware
 
 
 app = FastAPI(title="NutriAgent - Security & Validation Agent")
+app.add_middleware(TraceLoggingMiddleware)
 
 # Separate per-IP counters for each decorated route. Local demo only: counters
 # reset on restart and are not shared between server worker processes.
@@ -112,6 +114,7 @@ async def process(request: Request, payload: SecurityRequest):
                 "raw_text": clean_text
             },
             timeout=30.0,
+            headers={"X-Trace-ID": request.state.trace_id},
         )
 
     response.raise_for_status()

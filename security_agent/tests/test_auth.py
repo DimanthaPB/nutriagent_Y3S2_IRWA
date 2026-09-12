@@ -164,6 +164,7 @@ class AuthTests(unittest.TestCase):
             "http://intake.test:8002/process",
             json={"user_id": "test-demo", "raw_text": "I want a meal plan"},
             timeout=30.0,
+            headers={"X-Trace-ID": response.headers["X-Trace-ID"]},
         )
 
     def test_sanitization_still_rejects_empty_and_blocked_text(self):
@@ -205,6 +206,7 @@ class AuthTests(unittest.TestCase):
                     "http://intake.test:8002/process",
                     json={"user_id": "test-demo", "raw_text": text},
                     timeout=30.0,
+                    headers={"X-Trace-ID": response.headers["X-Trace-ID"]},
                 )
 
     def test_authentication_still_precedes_validation(self):

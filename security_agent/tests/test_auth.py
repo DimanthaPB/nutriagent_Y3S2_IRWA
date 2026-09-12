@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi.testclient import TestClient
 from jose import jwt
+from starlette.config import Config
 
 
 TEST_ENV = {
@@ -19,10 +20,15 @@ TEST_ENV = {
     "DEMO_USER_ID": "test-demo",
     "DEMO_PASSWORD": "test-only-password",
     "INTAKE_AGENT_URL": "http://intake.test:8002",
+    # Keep batch validation tests under their quota; dedicated rate-limit tests
+    # exercise the real demo defaults and 429 responses separately.
+    "LOGIN_RATE_LIMIT": "1000/minute",
+    "PROCESS_RATE_LIMIT": "1000/minute",
 }
 
 # Never load the developer's .env, including during module imports.
-with patch.dict(os.environ, TEST_ENV, clear=True), patch("dotenv.load_dotenv"):
+with patch.dict(os.environ, TEST_ENV, clear=True), patch("dotenv.load_dotenv"), \
+        patch("slowapi.extension.Config", return_value=Config()):
     from security_agent import auth, main
 
 
@@ -31,6 +37,8 @@ class AuthTests(unittest.TestCase):
         environment = patch.dict(os.environ, TEST_ENV, clear=True)
         environment.start()
         self.addCleanup(environment.stop)
+        main.limiter.reset()
+        self.addCleanup(main.limiter.reset)
         self.client = TestClient(main.app)
         self.addCleanup(self.client.close)
 

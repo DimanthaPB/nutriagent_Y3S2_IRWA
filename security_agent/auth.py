@@ -17,6 +17,20 @@ if not SECRET_KEY or not SECRET_KEY.strip():
 if ALGORITHM not in {"HS256", "HS384", "HS512"}:
     raise RuntimeError("JWT_ALGORITHM must be HS256, HS384, or HS512")
 
+if SECRET_KEY.strip().lower() in {
+    "replace-with-a-random-secret", "replace-with-your-secret", "your-secret-key",
+    "your-256-bit-secret", "changeme", "change-me", "secret", "example-secret",
+}:
+    raise RuntimeError("JWT_SECRET must not be a placeholder or example value")
+
+try:
+    secret_length = len(SECRET_KEY.encode("utf-8"))
+except UnicodeError:
+    raise RuntimeError("JWT_SECRET must be valid UTF-8 text") from None
+minimum_secret_bytes = {"HS256": 32, "HS384": 48, "HS512": 64}[ALGORITHM]
+if secret_length < minimum_secret_bytes:
+    raise RuntimeError(f"JWT_SECRET must contain at least {minimum_secret_bytes} bytes for {ALGORITHM}")
+
 try:
     ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "30"))
     if ACCESS_TOKEN_EXPIRE_MINUTES <= 0:

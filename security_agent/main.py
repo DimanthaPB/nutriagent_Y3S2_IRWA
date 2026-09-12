@@ -7,38 +7,46 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-from limits import parse_many
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from pydantic import BaseModel, field_validator
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from shared.schemas import SecurityRequest
 from security_agent.auth import create_access_token, verify_access_token
 from security_agent.validation import sanitize_text
 from security_agent.logging_config import TraceLoggingMiddleware
+from security_agent.rate_limiting import RateLimitedRoute, limiter
 
 
 app = FastAPI(title="NutriAgent - Security & Validation Agent")
+app.router.route_class = RateLimitedRoute
 app.add_middleware(TraceLoggingMiddleware)
 
-# Separate per-IP counters for each decorated route. Local demo only: counters
+# Separate per-IP counters for each protected route. Local demo only: counters
 # reset on restart and are not shared between server worker processes.
-limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-def configured_rate_limit(name: str, default: str) -> str:
-    value = os.getenv(name, default)
-    try:
-        rules = parse_many(value)
-        if not rules or any(rule.amount <= 0 for rule in rules):
-            return default
-    except ValueError:
-        # SlowAPI can skip malformed dynamic limits; keep the default protection.
-        return default
-    return value
+@app.exception_handler(RequestValidationError)
+async def safe_validation_error(request: Request, exc: RequestValidationError):
+    messages = {
+        "missing": "Field required",
+        "string_type": "Input should be a valid string",
+        "json_invalid": "Invalid JSON",
+        "model_attributes_type": "Input must be a JSON object",
+        "value_error": "Invalid field value",
+    }
+    safe_locations = {"body", "query", "path", "header", "username", "password", "user_id", "raw_text", "token"}
+    errors = []
+    for error in exc.errors():
+        kind = error["type"] if error["type"] in messages else "validation_error"
+        location = [part if isinstance(part, int) or part in safe_locations else "field"
+                    for part in error.get("loc", ())]
+        errors.append({"loc": location, "type": kind, "msg": messages.get(kind, "Invalid request")})
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 INTAKE_AGENT_URL = os.getenv(
     "INTAKE_AGENT_URL",
@@ -57,9 +65,17 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+    @field_validator("username", "password")
+    @classmethod
+    def valid_utf8(cls, value: str) -> str:
+        try:
+            value.encode("utf-8")
+        except UnicodeError:
+            raise ValueError("Credentials must be valid UTF-8 text") from None
+        return value
+
 
 @app.post("/login")
-@limiter.limit(lambda: configured_rate_limit("LOGIN_RATE_LIMIT", "5/minute"))
 def login(request: Request, payload: LoginRequest):
     # Mock university-project login; no persistent user management.
     demo_user_id = os.getenv("DEMO_USER_ID")
@@ -92,7 +108,6 @@ def health():
 
 
 @app.post("/process")
-@limiter.limit(lambda: configured_rate_limit("PROCESS_RATE_LIMIT", "10/minute"))
 async def process(request: Request, payload: SecurityRequest):
     subject = authenticate(payload.token)
     if subject is None:
@@ -106,17 +121,27 @@ async def process(request: Request, payload: SecurityRequest):
 
     clean_text = sanitize_text(payload.raw_text)
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{INTAKE_AGENT_URL}/process",
-            json={
-                "user_id": payload.user_id,
-                "raw_text": clean_text
-            },
-            timeout=30.0,
-            headers={"X-Trace-ID": request.state.trace_id},
-        )
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{INTAKE_AGENT_URL}/process",
+                json={
+                    "user_id": payload.user_id,
+                    "raw_text": clean_text
+                },
+                timeout=30.0,
+                headers={"X-Trace-ID": request.state.trace_id},
+            )
+        response.raise_for_status()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Intake service timed out") from None
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Intake service unavailable") from None
 
-    response.raise_for_status()
-
-    return response.json()
+    try:
+        result = response.json()
+        # Ensure downstream JSON is also serializable as a safe HTTP JSON response.
+        JSONResponse(content=result)
+    except (ValueError, UnicodeError, TypeError):
+        raise HTTPException(status_code=502, detail="Invalid response from Intake service") from None
+    return result

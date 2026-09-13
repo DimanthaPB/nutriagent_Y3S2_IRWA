@@ -49,17 +49,41 @@ async def process(request: PlanningRequest):
     # foods in request.retrieved_items, and require a "reason" tied to a
     # specific field of the profile for every recommendation (explainability).
 
-    goals = request.profile.goals or ["general health"]
-    allergies = request.profile.allergies or []
+    if not request.retrieved_items:
+        return MealPlan(
+            user_id=request.profile.user_id,
+            meals=[],
+            disclaimer=(
+                "No suitable food items were retrieved for this request. "
+                "This is AI-generated guidance, not medical advice."
+            ),
+        )
+
+    profile = request.profile
+    goals = profile.goals or ["general health"]
+    preferences = profile.preferences or []
+    allergies = profile.allergies or []
+
+    reason_parts = [f"Fits goal(s) {', '.join(goals)}"]
+
+    if profile.diet_type:
+        reason_parts.append(f"matches {profile.diet_type} diet type")
+
+    if preferences:
+        reason_parts.append(f"reflects preference(s) {', '.join(preferences)}")
+
+    if allergies:
+        reason_parts.append(
+            f"was retrieved after allergy filtering for {', '.join(allergies)}"
+        )
+
+    reason = "; ".join(reason_parts)
 
     meals = [
         MealRecommendation(
             name=item.name,
             calories=item.calories,
-            reason=(
-                f"Fits goal(s) {', '.join(goals)}"
-                + (f"; avoids allergen(s) {', '.join(allergies)}" if allergies else "")
-            ),
+            reason=reason,
             source=item.source,
         )
         for item in request.retrieved_items[:3]

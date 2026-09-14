@@ -1,0 +1,4 @@
+# SQLite may create sidecars containing account and audit data.
+*.db-journal
+*.db-wal
+*.db-shm

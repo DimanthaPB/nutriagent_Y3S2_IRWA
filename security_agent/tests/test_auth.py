@@ -3,6 +3,7 @@
 import os
 import runpy
 import unittest
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -13,7 +14,10 @@ from jose import jwt
 from starlette.config import Config
 
 
+_database_directory = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
+
 TEST_ENV = {
+    "SECURITY_DATABASE_PATH": str(Path(_database_directory.name) / "accounts.db"),
     "JWT_SECRET": "test-only-signing-key-never-use-outside-tests",
     "JWT_ALGORITHM": "HS256",
     "JWT_EXPIRE_MINUTES": "30",

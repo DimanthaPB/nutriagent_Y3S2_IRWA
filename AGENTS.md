@@ -20,12 +20,12 @@ plain HTTP with a shared JSON contract. There is no orchestrator process —
 each agent calls the next one directly and the response flows back up the
 same chain it came down.
 
-**Current status:** the full pipeline runs end-to-end today, but every
-agent's core logic is a **simplified stub**, not the final implementation.
-The purpose of the current code is to prove the architecture and contracts
-work, so each team member can now replace their own stub independently
-without breaking anyone else's agent — as long as the shared schema is
-respected.
+**Current Security status:** the Security & Validation Agent has implemented
+JWT authentication, input validation, rate limiting, structured tracing, and
+Fernet utilities. Final verification passed 89 tests on Python 3.12; Security
+is ready for integration testing. Preserve the chained architecture and
+shared schemas when extending any agent. Other agents' current states and
+next steps are documented in their sections below.
 
 ---
 
@@ -68,6 +68,12 @@ nutriagent/
                           the team before editing.
   security_agent/
     main.py            <- FastAPI app, port 8001
+    auth.py            <- JWT creation and verification
+    validation.py      <- Text limits and deterministic rejection rules
+    rate_limiting.py   <- SlowAPI checks before body validation
+    logging_config.py  <- Structured request logs and UUID4 trace headers
+    encryption.py      <- Standalone Fernet utilities for future storage
+    tests/             <- Security unit and mocked gateway tests
     requirements.txt
   intake_agent/
     main.py            <- FastAPI app, port 8002
@@ -114,14 +120,61 @@ drifts and agents silently break against each other.
 ## 5. Per-agent current state and what's real vs. stubbed
 
 ### Security & Validation Agent (`security_agent/main.py`)
-- **Real:** FastAPI app, `/health` endpoint, regex-based rejection of a
-  small list of prompt-injection/malicious patterns, forwarding to Intake.
-- **Stubbed:** `authenticate()` always returns `True` — no real JWT check
-  yet. No encryption of stored data (nothing is persisted here yet anyway).
-  No rate limiting. No structured trace-ID logging.
-- **To extend:** add real JWT verification, `cryptography.fernet` for
-  encrypting any health data before storage, `slowapi` for rate limiting,
-  and per-request trace IDs propagated to downstream agents via a header.
+
+- **Endpoints (port 8001):** unrestricted `GET /health` returns
+  `{"status":"ok","agent":"security"}`. `POST /login` accepts JSON
+  `username` and `password` and returns `access_token` plus `token_type`.
+  `POST /process` accepts the existing shared `SecurityRequest` body.
+- **Authentication:** login checks the configured `DEMO_USER_ID` and
+  `DEMO_PASSWORD`. JWT signature, nonempty `sub`, and `exp` are verified.
+  Invalid credentials or missing/invalid/expired JWTs return `401`;
+  a verified subject different from `request.user_id` returns `403`.
+  Malformed fields and invalid Unicode credentials return sanitized `422`.
+  Missing demo credentials return `503`.
+- **Configuration:** root `.env` loading for authentication is explicit;
+  existing environment variables take precedence. Never inspect or expose
+  local secrets. `JWT_SECRET` must not be empty, a known placeholder, or
+  shorter than 32/48/64 UTF-8 bytes for HS256/HS384/HS512 respectively.
+  Invalid JWT configuration fails at load time. Defaults are HS256 and
+  `JWT_EXPIRE_MINUTES=30`; configuration names are listed in `.env.example`.
+- **Validation:** authentication and identity checks precede text validation,
+  which precedes forwarding. Empty/whitespace-only text, input over 5,000
+  characters (including padding), and blocked patterns return `400`.
+  Trimming preserves internal whitespace. Case-insensitive regexes handle
+  extra whitespace in obvious prompt-injection commands (ignore/disregard/
+  forget/override instructions or rules), system-prompt references, script
+  tags, and `DROP TABLE` payloads. Normal nutrition requests remain allowed.
+- **Rate limiting:** SlowAPI uses separate per-client-IP quotas for `/login`
+  (`LOGIN_RATE_LIMIT=5/minute`) and `/process`
+  (`PROCESS_RATE_LIMIT=10/minute`). The route wrapper checks quota before
+  body parsing, so malformed JSON, empty bodies, missing fields, and failed
+  authentication consume quota. Valid requests count once; excess requests
+  return `429`. Invalid configured limits fall back to defaults. `/health`
+  is unrestricted.
+- **Logging and tracing:** one structured JSON request record contains UTC
+  timestamp, `trace_id`, agent `security`, method, route path, status, and
+  duration. Never log bodies, query strings, passwords, JWTs, keys, or health
+  text. Accept a single canonical UUID4 `X-Trace-ID`, otherwise generate a
+  UUID4. Return it in response headers, including handled errors and 429s,
+  and forward the same header to Intake. Unexpected unhandled 500s may lack
+  the response header.
+- **Gateway contract:** send exactly `{"user_id": ..., "raw_text": ...}`
+  to Intake, using trimmed **plaintext** text. Do not forward JWTs or add
+  trace IDs to the JSON body. Intake connection/protocol failures,
+  unsuccessful HTTP statuses, and invalid JSON return sanitized `502`;
+  timeouts return sanitized `504`, with trace headers and no exception details.
+- **Fernet:** `encrypt_sensitive_data(str) -> str` and
+  `decrypt_sensitive_data(str) -> str` in `encryption.py` read `FERNET_KEY`
+  lazily from configuration. They support UTF-8 and reject missing/invalid
+  keys and invalid/tampered ciphertext safely. They are for future persisted
+  allergies, conditions, and health fields. Security stores no health data;
+  do not connect encryption to current forwarding, JWTs, or passwords.
+- **Limitations:** login remains one mock university-project account; regex
+  rules do not detect every prompt injection; counters are in-memory and
+  per-process and reset on restart; 5,000 characters is an application-level
+  check, not an HTTP request-size limit. Fernet is not connected to persistence.
+- **Verification:** 89 Security tests passed at final verification, using
+  dummy configuration and mocked Intake. Live integration remains to be run.
 
 ### Intake & Profile Agent (`intake_agent/main.py`)
 - **Real:** FastAPI app, calls IR then Planning and returns the final
@@ -172,15 +225,39 @@ pip install -r planning_agent/requirements.txt
 uvicorn ir_agent.main:app --port 8003
 uvicorn planning_agent.main:app --port 8004
 uvicorn intake_agent.main:app --port 8002
-uvicorn security_agent.main:app --port 8001
+python -m uvicorn security_agent.main:app --port 8001
 ```
 
-End-to-end smoke test:
+Before starting Security, configure JWT and mock-login variables locally as
+described in the Security section. Keep `.env` ignored and use only
+placeholders in shared examples. `FERNET_KEY` is needed only for utility calls.
+
+Security-only tests (from the repository root, Intake mocked):
+
+```bash
+python -B -m unittest discover -s security_agent/tests -v
+```
+
+End-to-end smoke test with all four agents running:
+
+1. Log in with JSON credentials. Replace the example username with your
+   configured `DEMO_USER_ID` and use your configured password locally.
+
+```bash
+curl -X POST http://localhost:8001/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo","password":"<configured-demo-password>"}'
+```
+
+2. Receive `{"access_token":"<returned-jwt>","token_type":"bearer"}`.
+3. Send the returned token and the same user ID to `/process`:
+
 ```bash
 curl -X POST http://localhost:8001/process \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "u123", "raw_text": "I want to lose weight, I am allergic to peanuts"}'
+  -d '{"user_id":"demo","raw_text":"I want to lose weight, I am allergic to peanuts","token":"<returned-jwt>"}'
 ```
+
 Expected: a `MealPlan` JSON with `meals` that exclude anything containing
 "peanut" in the name, each with a non-empty `reason`. Every agent also
 exposes `/health` for isolated checks and `/docs` (FastAPI's auto-generated
@@ -212,8 +289,10 @@ shape can silently break a downstream agent that assumes the old shape.
 ## 8. Known limitations / explicitly out of scope for now
 
 - No database — nothing persists between requests.
-- No real authentication, encryption, or rate limiting yet (Security Agent
-  is a partial implementation).
-- No automated test suite yet (manual `curl`/`/docs` testing only).
+- Security implements JWT verification, rate limiting, structured tracing,
+  and standalone Fernet utilities; login is still a mock account and no
+  health data is persisted or encrypted in the active forwarding pipeline.
+- Security has automated tests with mocked Intake; use the authenticated
+  smoke test above for live integration verification.
 - No frontend client exists yet — the system is API-only.
 - Nutrition data is a 5-item mock list, not a real dataset.

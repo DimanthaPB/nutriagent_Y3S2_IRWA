@@ -20,8 +20,11 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI
 from google import genai
+from dotenv import load_dotenv
 
 from shared.schemas import PlanningRequest, MealPlan, MealRecommendation
+
+load_dotenv()
 
 app = FastAPI(title="NutriAgent - Meal Planning Agent")
 

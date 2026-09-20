@@ -64,6 +64,12 @@ class MealRecommendation(BaseModel):
     calories: float
     reason: str
     source: str
+    protein_g: Optional[float] = None
+    carbs_g: Optional[float] = None
+    fat_g: Optional[float] = None
+    ingredients: List[str] = []
+    prep_tip: Optional[str] = None
+    allergen_safety_note: Optional[str] = None
 
 
 class MealPlan(BaseModel):
@@ -71,3 +77,4 @@ class MealPlan(BaseModel):
     user_id: str
     meals: List[MealRecommendation]
     disclaimer: str = "This is AI-generated guidance, not medical advice."
+    intro_message: Optional[str] = None

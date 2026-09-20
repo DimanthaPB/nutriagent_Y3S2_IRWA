@@ -17,8 +17,12 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 import httpx
 import spacy
 from fastapi import FastAPI, HTTPException
+from dotenv import load_dotenv
 
 from shared.schemas import IntakeRequest, UserProfile
+
+# Load root .env if present
+load_dotenv(dotenv_path=pathlib.Path(__file__).resolve().parent.parent / ".env")
 
 app = FastAPI(title="NutriAgent - Intake & Profile Agent")
 

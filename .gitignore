@@ -71,6 +71,7 @@ Thumbs.db
 
 # Logs & Testing
 *.log
+logs/
 .pytest_cache/
 .coverage
 htmlcov/

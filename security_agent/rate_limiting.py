@@ -33,10 +33,16 @@ async def check_process_limit(request: Request):
     return Response()
 
 
+@limiter.limit(lambda: configured_rate_limit("REGISTER_RATE_LIMIT", "5/minute"))
+async def check_register_limit(request: Request):
+    return Response()
+
+
 class RateLimitedRoute(APIRoute):
     def get_route_handler(self):
         original_handler = super().get_route_handler()
-        check = {"/login": check_login_limit, "/process": check_process_limit}.get(self.path)
+        check = {"/login": check_login_limit, "/process": check_process_limit,
+                 "/register": check_register_limit}.get(self.path)
 
         async def handler(request: Request):
             if check is not None and request.method == "POST":

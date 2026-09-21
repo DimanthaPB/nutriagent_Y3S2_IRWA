@@ -36,17 +36,6 @@ PROFILE_DB_PATH = os.getenv(
 # separately downloaded language model. A trained spaCy NER component can be
 # added later without changing this API or the shared schema.
 ENTITY_VALUES = {
-    #"ALLERGY": {
-        #"peanut": ["peanut", "peanuts"],
-        #"tree_nuts": ["tree nut", "tree nuts", "almond", "almonds", "cashew", "cashews"],
-        #"shellfish": ["shellfish", "shrimp", "prawn", "crab", "lobster"],
-        #"fish": ["fish"],
-        #"dairy": ["dairy", "milk"],
-        #"gluten": ["gluten", "wheat"],
-        #"eggs": ["egg", "eggs"],
-        #"soy": ["soy", "soya"],
-        #"sesame": ["sesame"],
-    #},
 
     "ALLERGY": {
     "peanut": [
@@ -113,14 +102,6 @@ ENTITY_VALUES = {
     ],
     },
 
-    #"CONDITION": {
-        #"diabetes": ["diabetes", "diabetic", "type 1 diabetes", "type 2 diabetes"],
-        #"hypertension": ["hypertension", "high blood pressure"],
-        #"lactose_intolerance": ["lactose intolerant", "lactose intolerance"],
-        #"celiac_disease": ["celiac", "coeliac"],
-        #"kidney_disease": ["kidney disease", "renal disease"],
-    #},
-
     "CONDITION": {
     "diabetes": [
         "diabetes",
@@ -155,16 +136,6 @@ ENTITY_VALUES = {
         "kidney condition",
     ],
     },
-
-    #"GOAL": {
-        #"weight_loss": ["lose weight", "weight loss", "lose fat", "fat loss", "slim down"],
-        #"muscle_gain": ["gain muscle", "build muscle", "muscle gain", "bulk up"],
-        #"general_health": [
-            #"general health", "general health meals", "improve my health", "eat healthier",
-           # "healthy eating", "maintain my health",
-        #],
-        #"maintenance": ["maintain weight", "weight maintenance"],
-    #},
 
     "GOAL": {
     "weight_loss": [
@@ -212,11 +183,6 @@ ENTITY_VALUES = {
     ],
     },
 
-    #"DIET": {
-        #"vegan": ["vegan"], "vegetarian": ["vegetarian"], "pescatarian": ["pescatarian"],
-        #"keto": ["keto", "ketogenic"], "halal": ["halal"],
-    #},
-
     "DIET": {
     "vegan": [
         "vegan",
@@ -250,11 +216,6 @@ ENTITY_VALUES = {
         "halal food",
     ],
     },
-    
-    #"PREFERENCE": {
-        #"high_protein": ["high protein"], "low_carb": ["low carb", "low carbohydrate"],
-        #"low_sodium": ["low sodium", "low salt"], "quick_meals": ["quick meals", "easy meals", "fast meals"],
-    #},
 
     "PREFERENCE": {
     "high_protein": [
@@ -312,10 +273,6 @@ def build_nlp():
 
 
 NLP = build_nlp()
-#CALORIE_TARGET_PATTERN = re.compile(r"\b(?:about|around|at most|under|up to)?\s*(\d{3,4})\s*(?:kcal|calories?|cals?)\b", re.I)
-#NEGATION_PATTERN = re.compile(
-    #r"\b(?:no|not\s+allergic\s+to|no\s+allerg(?:y|ies)\s+to|without)\s+$", re.I
-#)
 
 CALORIE_TARGET_PATTERN = re.compile(
     r"(?:about|around|roughly|approximately|at most|under|up to|no more than|maximum of|less than)?"

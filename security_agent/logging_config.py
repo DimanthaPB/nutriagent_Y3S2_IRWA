@@ -60,6 +60,12 @@ class TraceLoggingMiddleware:
             if message["type"] == "http.response.start":
                 status = message["status"]
                 MutableHeaders(scope=message)["X-Trace-ID"] = trace_id
+                headers = MutableHeaders(scope=message)
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["X-Frame-Options"] = "DENY"
+                headers["Referrer-Policy"] = "no-referrer"
+                # CSP is deferred until inline JS/CSS and Google Fonts have an
+                # explicit compatible policy; avoid breaking the current UI.
             await send(message)
 
         try:

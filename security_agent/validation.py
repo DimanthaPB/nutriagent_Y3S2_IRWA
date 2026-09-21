@@ -24,6 +24,11 @@ def sanitize_text(text: str) -> str:
             detail=f"Input must not exceed {MAX_RAW_TEXT_LENGTH} characters.",
         )
 
+    try:
+        text.encode("utf-8")
+    except UnicodeError:
+        raise HTTPException(status_code=400, detail="Input must be valid UTF-8 text.") from None
+
     clean_text = text.strip()
     if not clean_text:
         raise HTTPException(status_code=400, detail="Empty input is not allowed.")

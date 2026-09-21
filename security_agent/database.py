@@ -9,7 +9,15 @@ from contextlib import contextmanager
 from pathlib import Path
 
 DB_PATH = Path(__file__).with_name("nutriagent.db")
-ITERATIONS = 100_000
+LEGACY_ITERATIONS = 100_000
+ITERATIONS = 600_000
+HASH_PREFIX = "pbkdf2_sha256$v1$"
+
+
+def _hash_password(password: str, salt: bytes) -> str:
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, ITERATIONS)
+    # Metadata stays in the existing TEXT column: no destructive schema migration.
+    return f"{HASH_PREFIX}{ITERATIONS}${digest.hex()}"
 
 
 @contextmanager
@@ -45,8 +53,9 @@ def connection():
 def validate_registration(username: str, password: str) -> None:
     if not re.fullmatch(r"[A-Za-z0-9]{3,30}", username):
         raise ValueError("Username must contain 3–30 ASCII letters or digits")
-    if not 6 <= len(password) <= 1024:
-        raise ValueError("Password must contain 6–1024 characters")
+    # Registration only: existing shorter passwords still verify without trimming.
+    if not 8 <= len(password) <= 1024 or not password.strip():
+        raise ValueError("Password must contain 8–1024 characters and not be whitespace-only")
     try:
         password.encode("utf-8")
     except UnicodeError:
@@ -55,10 +64,18 @@ def validate_registration(username: str, password: str) -> None:
 
 def verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
     try:
+        iterations = LEGACY_ITERATIONS
+        if "$" in hash_hex:
+            algorithm, version, count, hash_hex = hash_hex.split("$")
+            if algorithm != "pbkdf2_sha256" or version != "v1":
+                return False
+            iterations = int(count)
+            if iterations not in {LEGACY_ITERATIONS, ITERATIONS}:
+                return False
         salt, expected = bytes.fromhex(salt_hex), bytes.fromhex(hash_hex)
         if len(salt) != 16 or len(expected) != 32:
             return False
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, ITERATIONS)
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
         return secrets.compare_digest(actual, expected)
     except (ValueError, UnicodeError, TypeError):
         return False
@@ -67,11 +84,11 @@ def verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
 def register_user(username: str, password: str) -> bool:
     validate_registration(username, password)
     salt = os.urandom(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, ITERATIONS)
+    digest = _hash_password(password, salt)
     try:
         with connection() as conn:
             conn.execute("INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)",
-                         (username, digest.hex(), salt.hex()))
+                         (username, digest, salt.hex()))
         return True
     except sqlite3.IntegrityError:
         return False
@@ -87,8 +104,15 @@ def authenticate_user(username: str, password: str) -> dict | None:
         row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     # Also perform the expensive hash for unknown users.
     valid = verify_password(password, row["salt"] if row else "00" * 16,
-                            row["password_hash"] if row else "00" * 32)
+                            row["password_hash"] if row else f"{HASH_PREFIX}{ITERATIONS}$" + "00" * 32)
     if row and valid:
+        if not row["password_hash"].startswith(f"{HASH_PREFIX}{ITERATIONS}$"):
+            salt = os.urandom(16)
+            upgraded = _hash_password(password, salt)
+            with connection() as conn:
+                # Concurrent successful logins must not overwrite a newer hash.
+                conn.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ? AND password_hash = ?",
+                             (upgraded, salt.hex(), row["id"], row["password_hash"]))
         return {"id": row["id"], "username": row["username"], "created_at": row["created_at"]}
     return None
 

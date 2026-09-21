@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, FileResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.concurrency import run_in_threadpool
 
 from shared.schemas import SecurityRequest
 from security_agent.auth import create_access_token, verify_access_token
@@ -41,7 +42,7 @@ async def database_error(request: Request, exc: sqlite3.Error):
 async def safe_validation_error(request: Request, exc: RequestValidationError):
     if request.url.path == "/login":
         # Malformed bodies have no trustworthy username; never inspect their values.
-        database.log_login_attempt("<invalid-request>", "FAILED",
+        await run_in_threadpool(database.log_login_attempt, "<invalid-request>", "FAILED",
                                    request.client.host if request.client else "unknown", request.state.trace_id)
     messages = {
         "missing": "Field required",
